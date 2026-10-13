@@ -1,0 +1,55 @@
+name: ARCCAPTAIN weekly business and ads report
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Generate the workbook without sending it to Feishu
+        required: false
+        default: false
+        type: boolean
+  schedule:
+    # America/New_York is UTC-4 in daylight time and UTC-5 in standard time.
+    # The program keeps only the run whose local hour is 09:00.
+    - cron: "0 13 * * 1"
+    - cron: "0 14 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: arccaptain-weekly-report
+  cancel-in-progress: false
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+      DEEPSEEK_MODEL: deepseek-chat
+      LINGXING_MCP_URL: ${{ secrets.LINGXING_MCP_URL }}
+      LINGXING_MCP_TOKEN: ${{ secrets.LINGXING_MCP_TOKEN }}
+      LINGXING_MCP_HEADERS_JSON: ${{ secrets.LINGXING_MCP_HEADERS_JSON }}
+      FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
+      FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
+      FEISHU_RECEIVE_ID: ${{ secrets.FEISHU_RECEIVE_ID }}
+      FEISHU_RECEIVE_ID_TYPE: open_id
+      REPORT_TIMEZONE: America/New_York
+      GITHUB_EVENT_NAME: ${{ github.event_name }}
+      INPUT_DRY_RUN: ${{ inputs.dry_run }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Generate and deliver report
+        run: python -m src.weekly_report
+
