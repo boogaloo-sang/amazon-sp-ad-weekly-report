@@ -218,7 +218,14 @@ async def collect_with_deepseek(config: dict[str, Any], periods: dict[str, tuple
                     tool_calls = message.get("tool_calls") or []
                     if not tool_calls:
                         payload = json.loads(message.get("content") or "{}")
-                        validate_payload(payload, config)
+                        try:
+                            validate_payload(payload, config)
+                        except ValueError as exc:
+                            messages.append({
+                                "role": "user",
+                                "content": f"你的 JSON 未通过校验：{exc}。请保留已有数据，补齐 summary、products、insights 后重新输出完整 JSON，不要调用工具。",
+                            })
+                            continue
                         return payload
                     for call in tool_calls:
                         name = call["function"]["name"]
