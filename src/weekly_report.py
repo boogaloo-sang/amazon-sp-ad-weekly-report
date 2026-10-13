@@ -140,7 +140,7 @@ def validate_payload(payload: dict[str, Any], config: dict[str, Any]) -> None:
 
 async def collect_with_deepseek(config: dict[str, Any], periods: dict[str, tuple[dt.date, dt.date]]) -> dict[str, Any]:
     from mcp import ClientSession
-    from mcp.client.streamable_http import streamable_http_client
+    from mcp.client.streamable_http import streamablehttp_client
 
     api_key = os.environ["DEEPSEEK_API_KEY"]
     mcp_url = os.environ["LINGXING_MCP_URL"]
@@ -167,7 +167,7 @@ async def collect_with_deepseek(config: dict[str, Any], periods: dict[str, tuple
         f"最终结构：{_json(report_schema())}"
     )
 
-    async with streamable_http_client(mcp_url, headers=headers or None) as (read, write, _):
+    async with streamablehttp_client(mcp_url, headers=headers or None) as (read, write, _):
         async with ClientSession(read, write) as session:
             await session.initialize()
             listed = await session.list_tools()
@@ -501,4 +501,5 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
 
