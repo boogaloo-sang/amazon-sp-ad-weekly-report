@@ -14,7 +14,7 @@
 - 金额：全部为美元。
 - TACOS：广告花费 ÷ 净销售额。
 - 高花费产品：最近完整周广告花费大于 200 美元，按国家 × 父 ASIN 聚合。
-- 负责人：林依依、韦俐明、倪聪燕、桑剑波、伍家羲。
+- 负责人：由加密的 `OWNER_CONFIG_JSON` Secret 提供，不公开姓名和 UID。
 - 产品对比：A 本周、B 上周、C 本月、D 上月同期，纵向排列。
 
 ## GitHub Actions Secrets
@@ -27,6 +27,7 @@
 | `LINGXING_MCP_URL` | 可从 GitHub Runner 访问的领星 MCP Streamable HTTP 地址 |
 | `LINGXING_MCP_TOKEN` | 领星 MCP Bearer Token；不需要时可留空 |
 | `LINGXING_MCP_HEADERS_JSON` | 其他认证请求头的 JSON；不需要时可留空 |
+| `OWNER_CONFIG_JSON` | 负责人姓名与 UID 数组，例如 `[{"name":"负责人A","uid":"123"}]` |
 | `FEISHU_APP_ID` | 飞书自建应用 App ID |
 | `FEISHU_APP_SECRET` | 飞书自建应用 App Secret |
 | `FEISHU_RECEIVE_ID` | 当前应用下接收人的 open_id |
