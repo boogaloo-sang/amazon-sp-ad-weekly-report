@@ -1,0 +1,16 @@
+{
+  "account": "ARCCAPTAIN",
+  "currency": "USD",
+  "timezone": "America/New_York",
+  "high_spend_threshold": 200,
+  "anomaly_rules": {
+    "sales_drop_rate": -0.30,
+    "weekly_previous_sales_min": 5,
+    "monthly_previous_sales_min": 10,
+    "acos_high": 0.35,
+    "acos_increase_pp": 0.10,
+    "tacos_high": 0.20,
+    "tacos_increase_pp": 0.08
+  }
+}
+
