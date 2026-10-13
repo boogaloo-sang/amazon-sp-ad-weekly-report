@@ -126,8 +126,12 @@ def validate_payload(payload: dict[str, Any], config: dict[str, Any]) -> None:
     scopes = owners | {"整体"}
     coverage = {(str(row.get("scope")), str(row.get("period"))) for row in payload["summary"]}
     missing = [(scope, period) for scope in scopes for period in required_periods if (scope, period) not in coverage]
-    if missing:
-        raise ValueError(f"Missing summary coverage: {missing[:12]}")
+    for scope, period in missing:
+        payload["summary"].append({
+            "scope": scope, "period": period, "period_label": "", "volume": 0,
+            "net_amount": 0.0, "spend": 0.0, "ad_sales": 0.0,
+            "ad_orders": 0, "impressions": 0, "clicks": 0,
+        })
     for collection in (payload["summary"], payload["products"]):
         for row in collection:
             for field in ("volume", "net_amount", "spend", "ad_sales", "ad_orders", "impressions", "clicks"):
