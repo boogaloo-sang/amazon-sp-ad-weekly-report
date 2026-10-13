@@ -161,7 +161,11 @@ async def collect_with_deepseek(config: dict[str, Any], periods: dict[str, tuple
     )
     user = (
         f"日期范围：{_json(period_text)}。负责人及 UID：{_json(owners)}。"
-        "请先用 help/search 发现所需只读工具，再获取数据。summary 必须覆盖整体及五位负责人在全部七个期间。"
+        "固定使用 query_product_performance_asin_lists，它已同时返回销量、净销售额、广告花费、广告销售额、"
+        "广告订单、曝光、点击、国家、父ASIN和负责人。只需 search 一次取得它的 Schema，之后不要再 help/search。"
+        "对每个期间调用一次按 principal 汇总（一次返回全部负责人），再对 W3/W4/Mprev/Mcur 各调用一次按 parent_asin 汇总；"
+        "调用 action 时 currency_code=USD、turn_on_summary=1、offset=0，并使用足够的 length。总业务查询不得超过 11 次。"
+        "summary 必须覆盖整体及五位负责人在全部七个期间；整体数值取响应 total_sum，负责人取 principal 汇总行。"
         "products 必须覆盖 W3、W4、Mprev、Mcur，并保留国家、店铺标识、父ASIN、产品名和负责人；"
         "后续程序会筛选 W4 花费大于 200 美元的产品。币种必须是 USD。"
         f"最终结构：{_json(report_schema())}"
@@ -187,18 +191,22 @@ async def collect_with_deepseek(config: dict[str, Any], periods: dict[str, tuple
                 {"role": "user", "content": user},
             ]
             async with httpx.AsyncClient(timeout=180) as client:
-                for _ in range(60):
+                for round_no in range(30):
+                    force_final = round_no >= 22
+                    if round_no == 22:
+                        messages.append({"role": "user", "content": "停止调用工具。立即仅根据已取得数据输出最终合法 JSON；缺失负责人行用零值补齐。"})
+                    request_body = {
+                        "model": os.getenv("DEEPSEEK_MODEL", "deepseek-chat"),
+                        "messages": messages,
+                        "temperature": 0,
+                        "response_format": {"type": "json_object"},
+                    }
+                    if not force_final:
+                        request_body.update({"tools": tools, "tool_choice": "auto"})
                     response = await client.post(
                         DEEPSEEK_URL,
                         headers={"Authorization": f"Bearer {api_key}"},
-                        json={
-                            "model": os.getenv("DEEPSEEK_MODEL", "deepseek-chat"),
-                            "messages": messages,
-                            "tools": tools,
-                            "tool_choice": "auto",
-                            "temperature": 0,
-                            "response_format": {"type": "json_object"},
-                        },
+                        json=request_body,
                     )
                     response.raise_for_status()
                     message = response.json()["choices"][0]["message"]
