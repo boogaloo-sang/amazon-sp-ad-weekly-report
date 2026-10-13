@@ -31,6 +31,7 @@ jobs:
       LINGXING_MCP_URL: ${{ secrets.LINGXING_MCP_URL }}
       LINGXING_MCP_TOKEN: ${{ secrets.LINGXING_MCP_TOKEN }}
       LINGXING_MCP_HEADERS_JSON: ${{ secrets.LINGXING_MCP_HEADERS_JSON }}
+      OWNER_CONFIG_JSON: ${{ secrets.OWNER_CONFIG_JSON }}
       FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
       FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
       FEISHU_RECEIVE_ID: ${{ secrets.FEISHU_RECEIVE_ID }}
