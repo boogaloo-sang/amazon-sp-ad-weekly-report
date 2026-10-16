@@ -126,12 +126,10 @@ def validate_payload(payload: dict[str, Any], config: dict[str, Any]) -> None:
     scopes = owners | {"整体"}
     coverage = {(str(row.get("scope")), str(row.get("period"))) for row in payload["summary"]}
     missing = [(scope, period) for scope in scopes for period in required_periods if (scope, period) not in coverage]
-    for scope, period in missing:
-        payload["summary"].append({
-            "scope": scope, "period": period, "period_label": "", "volume": 0,
-            "net_amount": 0.0, "spend": 0.0, "ad_sales": 0.0,
-            "ad_orders": 0, "impressions": 0, "clicks": 0,
-        })
+    if missing:
+        raise ValueError(f"Missing summary coverage: {missing[:10]}")
+    if not payload["products"]:
+        raise ValueError("Product detail is empty")
     for collection in (payload["summary"], payload["products"]):
         for row in collection:
             for field in ("volume", "net_amount", "spend", "ad_sales", "ad_orders", "impressions", "clicks"):
@@ -140,6 +138,129 @@ def validate_payload(payload: dict[str, Any], config: dict[str, Any]) -> None:
                     row[field] = 0
                 elif not isinstance(value, (int, float)):
                     raise ValueError(f"Non-numeric {field}: {value!r}")
+
+
+def _mcp_payload(result: Any) -> dict[str, Any]:
+    text = "\n".join(item.text for item in (getattr(result, "content", []) or []) if getattr(item, "text", None))
+    decoded = json.loads(text)
+    if not decoded.get("success", decoded.get("code") == 1):
+        raise RuntimeError(f"LingXing query failed: {decoded.get('msg')}")
+    data = decoded.get("data", {})
+    if isinstance(data, dict) and isinstance(data.get("data"), dict):
+        data = data["data"]
+    if not isinstance(data, dict):
+        raise RuntimeError("LingXing returned an unexpected response")
+    return data
+
+
+def _number(row: dict[str, Any], *names: str) -> float:
+    for name in names:
+        value = row.get(name)
+        if value not in (None, ""):
+            return float(value)
+    return 0.0
+
+
+def _metric_row(source: dict[str, Any], scope: str, period: str, label: str) -> dict[str, Any]:
+    return {
+        "scope": scope, "period": period, "period_label": label,
+        "volume": int(_number(source, "volume")),
+        "net_amount": _number(source, "net_amount"),
+        "spend": _number(source, "spend"),
+        "ad_sales": _number(source, "ad_sales_amount", "ad_sales"),
+        "ad_orders": int(_number(source, "ad_order_quantity", "ad_orders")),
+        "impressions": int(_number(source, "impressions")),
+        "clicks": int(_number(source, "clicks")),
+    }
+
+
+def _product_identity(row: dict[str, Any]) -> tuple[str, str, str, str, str]:
+    stores = row.get("seller_store_countries") or []
+    countries = sorted({str(store.get("country", "")) for store in stores if store.get("country")})
+    parent_rows = row.get("parent_asins") or []
+    sids = sorted({str(item.get("sid", "")) for item in parent_rows if item.get("sid")})
+    parent_asin = str(row.get("parent_asin") or "")
+    if not parent_asin and parent_rows:
+        parent_asin = str(parent_rows[0].get("parent_asin") or "")
+    principals = ",".join(str(x) for x in (row.get("principal_names") or []))
+    return "/".join(countries) or "未标注", "/".join(sids), parent_asin, str(row.get("item_name") or ""), principals
+
+
+async def collect_report_data(config: dict[str, Any], periods: dict[str, tuple[dt.date, dt.date]]) -> dict[str, Any]:
+    """Fetch numeric rows deterministically; DeepSeek is used only for narrative insights."""
+    from mcp import ClientSession
+    from mcp.client.streamable_http import streamablehttp_client
+
+    mcp_url = os.environ["LINGXING_MCP_URL"]
+    headers: dict[str, str] = {}
+    if os.getenv("LINGXING_MCP_TOKEN"):
+        headers["Authorization"] = f"Bearer {os.environ['LINGXING_MCP_TOKEN']}"
+    if os.getenv("LINGXING_MCP_HEADERS_JSON"):
+        headers.update(json.loads(os.environ["LINGXING_MCP_HEADERS_JSON"]))
+
+    async with streamablehttp_client(mcp_url, headers=headers or None) as (read, write, _):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+
+            async def query(period: str, owner_uid: str | None = None, details: bool = False) -> dict[str, Any]:
+                start, end = periods[period]
+                params: dict[str, Any] = {
+                    "start_date": start.isoformat(), "end_date": end.isoformat(),
+                    "date_type": "purchase", "currency_code": "USD",
+                    "summary_field": "parent_asin", "turn_on_summary": 1,
+                    "offset": 0, "length": 200 if details else 1,
+                }
+                if owner_uid:
+                    params["principal_uids"] = [owner_uid]
+                rows: list[dict[str, Any]] = []
+                while True:
+                    result = await session.call_tool("query_product_performance_asin_lists", params)
+                    data = _mcp_payload(result)
+                    page = data.get("list") or []
+                    rows.extend(page)
+                    if not details or len(page) < params["length"]:
+                        return {"total_sum": data.get("total_sum") or {}, "list": rows}
+                    params["offset"] += params["length"]
+                    if params["offset"] >= 5000:
+                        raise RuntimeError(f"Too many product rows for {period}")
+
+            summary: list[dict[str, Any]] = []
+            products: list[dict[str, Any]] = []
+            product_periods = {"W3", "W4", "Mprev", "Mcur"}
+            for period, (start, end) in periods.items():
+                label = f"{start.isoformat()}~{end.isoformat()}"
+                overall = await query(period, details=period in product_periods)
+                summary.append(_metric_row(overall["total_sum"], "整体", period, label))
+                if period in product_periods:
+                    for source in overall["list"]:
+                        country, sid, parent_asin, item_name, principals = _product_identity(source)
+                        owners = [owner["name"] for owner in config["owners"] if owner["name"] and owner["name"] in principals]
+                        product = _metric_row(source, "整体", period, label)
+                        product.update({"country": country, "sid": sid, "parent_asin": parent_asin, "item_name": item_name, "owners": owners})
+                        products.append(product)
+                for owner in config["owners"]:
+                    owner_data = await query(period, str(owner["uid"]))
+                    summary.append(_metric_row(owner_data["total_sum"], owner["name"], period, label))
+
+    payload = {"summary": summary, "products": products, "insights": []}
+    validate_payload(payload, config)
+    payload["insights"] = await generate_insights(payload)
+    return payload
+
+
+async def generate_insights(payload: dict[str, Any]) -> list[str]:
+    rows = index_rows(payload["summary"], ("scope", "period"))
+    compact = {period: rows[("整体", period)] for period in ("W3", "W4", "Mprev", "Mcur")}
+    prompt = "根据以下亚马逊经营数据给出最多3条可核验的中文异常结论。只返回JSON数组，不要Markdown。数据：" + _json(compact)
+    async with httpx.AsyncClient(timeout=90) as client:
+        response = await client.post(DEEPSEEK_URL, headers={"Authorization": f"Bearer {os.environ['DEEPSEEK_API_KEY']}"}, json={"model": os.getenv("DEEPSEEK_MODEL", "deepseek-chat"), "messages": [{"role": "user", "content": prompt}], "temperature": 0})
+        response.raise_for_status()
+        content = response.json()["choices"][0]["message"].get("content") or "[]"
+        try:
+            value = json.loads(content)
+            return [str(x) for x in value[:3]] if isinstance(value, list) else []
+        except json.JSONDecodeError:
+            return []
 
 
 async def collect_with_deepseek(config: dict[str, Any], periods: dict[str, tuple[dt.date, dt.date]]) -> dict[str, Any]:
@@ -500,7 +621,7 @@ async def async_main() -> int:
     missing = [name for name in required if not os.getenv(name)]
     if missing:
         raise RuntimeError("Missing required secrets: " + ", ".join(missing))
-    payload = await collect_with_deepseek(config, periods)
+    payload = await collect_report_data(config, periods)
     output = ROOT / "reports" / f"ARCCAPTAIN_经营与广告周月报_{periods['W4'][1].isoformat()}.xlsx"
     build_workbook(payload, config, periods, output)
     dry_run = os.getenv("INPUT_DRY_RUN", "false").lower() == "true"
