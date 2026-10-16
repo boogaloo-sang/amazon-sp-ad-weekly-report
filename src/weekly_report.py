@@ -214,7 +214,10 @@ async def collect_report_data(config: dict[str, Any], periods: dict[str, tuple[d
                     params["principal_uids"] = [owner_uid]
                 rows: list[dict[str, Any]] = []
                 while True:
-                    result = await session.call_tool("query_product_performance_asin_lists", params)
+                    result = await session.call_tool("action", {
+                        "toolId": "query_product_performance_asin_lists",
+                        "params": params,
+                    })
                     data = _mcp_payload(result)
                     page = data.get("list") or []
                     rows.extend(page)
